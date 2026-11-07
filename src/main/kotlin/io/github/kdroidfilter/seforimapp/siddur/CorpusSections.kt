@@ -52,12 +52,19 @@ internal class Outline(
                         node == root -> null
                         root.path.last() == "מוסף לשבת" && label == "לשבת" -> "!rosh_chodesh"
                         label == "לשבת ראש חודש" -> "rosh_chodesh"
+                        label == "וידוי" && "erev_yom_kippur" in flags -> null
+                        "selichot" in flags && condition(label) == "tachanun" -> null
                         else -> condition(label)
                     }
                     stack.add(node to rule)
                 }
                 val conditions = stack.mapNotNull { it.second }
-                val lineCondition = if (nodesAtRow.isEmpty()) condition(plain(row).substringBefore(':')) else null
+                val text = plain(row).substringBefore(':')
+                val lineCondition = if (nodesAtRow.isEmpty() && (text != "וידוי" || "erev_yom_kippur" !in flags)) {
+                    condition(text)?.takeUnless { it == "tachanun" && "selichot" in flags }
+                } else {
+                    null
+                }
                 val applies = (conditions + listOfNotNull(lineCondition)).all { flag ->
                     if (flag.startsWith("!")) flag.drop(1) !in flags else flag in flags
                 }
@@ -89,7 +96,7 @@ private fun condition(label: String): String? =
     when {
         label in setOf("ספירת העומר", "קריאת שמע על המיטה", "ברכת הלבנה", "קידוש לבנה", "קדוש לבנה") -> "separate"
         label.startsWith("קדיש ") || label in setOf("קדיש", "ברכו", "קדושה", "חזרה", "חזרת השץ", "מודים דרבנן") -> "minyan"
-        label in setOf("תחנון", "וידוי", "נפילת אפים", "נפילת אפיים", "אל ארך אפים") -> "tachanun"
+        label in setOf("תחנון", "וידוי", "וידוי ויג המידות", "נפילת אפים", "נפילת אפיים", "שומר ישראל", "אל ארך אפים") -> "tachanun"
         label.startsWith("אבינו מלכנו") -> "avinu_malkenu"
         label in setOf("לשני וחמישי", "לימי שני וחמישי") -> "mon_thu"
         label == "מזמור לתודה" -> "mizmor_letoda"
@@ -189,12 +196,12 @@ internal fun baseKeys(
 
 internal fun machzorTitle(flags: Set<String>, nusach: Nusach): String? =
     when {
-        "rosh_hashana" in flags -> when (nusach) {
+        "rosh_hashana" in flags || "erev_rosh_hashana" in flags -> when (nusach) {
             ASHKENAZ -> "מחזור אשכנז לראש השנה"
             SEFARD -> "מחזור ראש השנה ספרד"
             EDOT_HAMIZRACH -> "מחזור ראש השנה עדות המזרח"
         }
-        "yom_kippur" in flags -> when (nusach) {
+        "yom_kippur" in flags || "erev_yom_kippur" in flags -> when (nusach) {
             ASHKENAZ -> "מחזור אשכנז ליום כיפור"
             SEFARD -> "מחזור ליום כפור ספרד"
             EDOT_HAMIZRACH -> "מחזור יום כיפור עדות המזרח"
@@ -204,6 +211,11 @@ internal fun machzorTitle(flags: Set<String>, nusach: Nusach): String? =
 
 internal fun machzorKeys(part: SiddurPart, flags: Set<String>): List<String> =
     when (part) {
+        MINCHA -> when {
+            "erev_yom_kippur" in flags -> listOf("תפלת מנחה לערב יום כפור", "מנחה לערב יום כפור", "מנחה לערב יום הכיפורים")
+            "erev_rosh_hashana" in flags -> listOf("תפילת מנחה לערב ראש השנה", "מנחה לערב ראש השנה")
+            else -> emptyList()
+        }
         MAARIV_YOM_TOV -> listOf("כל נדרי", "תפלת ערבית לליל יום כפור", "תפילת ערבית", "תפלת ערבית", "ערבית")
         SHACHARIT_YOM_TOV -> listOf(
             "תפילת שחרית", "תפלת שחרית", "שחרית", "סדר פתיחת ההיכל", "ברכת התורה", "קריאת התורה",

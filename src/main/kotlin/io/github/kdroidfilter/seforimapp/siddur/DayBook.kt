@@ -29,7 +29,9 @@ suspend fun buildDayBook(
     val nightFlags = flagsFor(tomorrow, MAARIV, prefs)
     val fast = "yom_kippur" in dayFlags
     val fastTonight = "yom_kippur" in nightFlags
+    val season = seasonalSelichot(civil, prefs)
     val dayParts = buildList {
+        if (season != null) add(SELICHOT)
         add(dayPartFor(civil, SHACHARIT, prefs))
         if (!fast && ("sat" in dayFlags || "festival" in dayFlags)) {
             add(if ("festival" in dayFlags) SEUDAT_YOM_TOV else SEUDAT_SHABBAT)
@@ -64,8 +66,10 @@ suspend fun buildDayBook(
                 }
             } +
             (if ("zimun_10" in selected) selected + "zimun" else selected)
-        val machzor = if (part.festival) machzorTitle(flags, nusach) else null
+        val machzor = if (part.festival || part == MINCHA) machzorTitle(flags, nusach) else null
         var lines = when {
+            part == SELICHOT && season != null ->
+                outline(season.title)?.read(listOf(season.key), flags + "selichot", showAll).orEmpty()
             machzor != null -> {
                 val keys = machzorKeys(part, flags).filter { holidayReading(it, flags) }
                 outline(machzor)?.read(keys, flags, showAll).orEmpty()
@@ -75,17 +79,30 @@ suspend fun buildDayBook(
         }
         if (part.familyOf() == SHACHARIT && machzor == null) {
             lines = morningAdditions(lines, base, flags, nusach, showAll)
+            fastSelichot(date, prefs)?.let { fast ->
+                val fastLines = base.read(listOf(fast.key), flags + "selichot", showAll)
+                lines = lines.withFastSelichot(fastLines)
+            }
         }
         if (part == SFIRAT_HAOMER && !showAll) lines = selectOmer(lines, flags, nusach)
         if (part == MEEIN_SHALOSH && !showAll) lines = selectFood(lines, flags)
         if (part == NEROT_CHANUKA && lines.isNotEmpty()) lines = lines.withSlot("chanuka_candles")
         if (part == KIDDUSH_LEVANA && lines.isNotEmpty()) lines = lines.withSlot("kiddush_levana")
-        val annotated = annotateCorpus(lines, flags, showAll, amud.takeIf { machzor == null })
+        val annotated = annotateCorpus(lines, flags, showAll, amud.takeIf { machzor == null && part != SELICHOT })
             .withReadings(if (machzor == null) readings else readings.filter { it.kind == ReadingKind.MEGILLAH }, part)
         return annotated.takeIf { it.any { line -> line.kind == Kind.TEXT } }?.let { BookSection(part, date, night, flags, it) }
     }
 
     return dayParts.mapNotNull { section(it, civil, false) } + nightParts.mapNotNull { section(it, tomorrow, true) }
+}
+
+private fun List<SiddurLine>.withFastSelichot(selichot: List<SiddurLine>): List<SiddurLine> {
+    if (selichot.isEmpty()) return this
+    val anchor = indexOfFirst {
+        it.kind == Kind.HEADING &&
+            plain(it.html) in setOf("אחר העמידה", "תחנון", "וידוי", "קריאת התורה", "סדר קריאת התורה")
+    }.takeIf { it >= 0 } ?: size
+    return take(anchor) + selichot.map { it.copy(special = true) } + drop(anchor)
 }
 
 private fun holidayReading(key: String, flags: Set<String>): Boolean =

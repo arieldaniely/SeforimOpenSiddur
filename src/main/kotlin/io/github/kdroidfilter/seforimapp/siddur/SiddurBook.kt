@@ -39,6 +39,7 @@ enum class SiddurPart(
     SEUDAT_YOM_TOV(festival = true),
     MINCHA_YOM_TOV(festival = true),
     NEILA(festival = true),
+    SELICHOT,
     ;
 
     fun familyOf(): SiddurPart =

@@ -36,6 +36,8 @@ internal fun flagsFor(
     val shabbat = date.dayOfWeek == DayOfWeek.SATURDAY
     val festival = day.isYomTovAssurBemelacha
     val previous = JewishCalendar(date.plus(-1, DateTimeUnit.DAY), prefs.inIsrael)
+    val minchaBeforeFestival = family == MINCHA &&
+        JewishCalendar(date.plus(1, DateTimeUnit.DAY), prefs.inIsrael).isYomTovAssurBemelacha
     return buildSet {
         if (prefs.inIsrael) add("israel")
         if (prefs.minyan) add("minyan")
@@ -43,12 +45,14 @@ internal fun flagsFor(
         if (shabbat) add("sat")
         if (festival) add("festival")
         if (!shabbat && !festival) add("weekday")
+        if (family == MINCHA && day.isErevYomKippur) add("erev_yom_kippur")
+        if (family == MINCHA && day.isErevRoshHashana) add("erev_rosh_hashana")
         if (day.isRoshChodesh) add("rosh_chodesh")
         if (day.isCholHamoed) add("chol_hamoed")
         if (day.isTaanis && day.yomTovIndex != JewishCalendar.YOM_KIPPUR) add("taanit")
         if (!prefs.beitAvel && when (family) {
                 SHACHARIT -> rules.isTachanunRecitedShacharis(day)
-                MINCHA -> rules.isTachanunRecitedMincha(day)
+                MINCHA -> !minchaBeforeFestival && rules.isTachanunRecitedMincha(day)
                 else -> false
             }
         ) {
@@ -98,7 +102,9 @@ internal fun flagsFor(
         if (day.jewishMonth == HebrewMonth.ELUL || day.jewishMonth == HebrewMonth.TISHREI && day.jewishDayOfMonth <= 21) {
             add("ledavid_ori")
         }
-        if ("aseret_yemei_teshuva" in this && !shabbat && !festival || "taanit" in this) add("avinu_malkenu")
+        if (!minchaBeforeFestival && ("aseret_yemei_teshuva" in this && !shabbat && !festival || "taanit" in this)) {
+            add("avinu_malkenu")
+        }
         when (day.yomTovIndex) {
             JewishCalendar.ROSH_HASHANA -> add("rosh_hashana")
             JewishCalendar.YOM_KIPPUR -> add("yom_kippur")

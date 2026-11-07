@@ -10,6 +10,18 @@ import kotlin.time.Instant
 
 class DayBookTest {
     @Test
+    fun minchaOnFestivalEvesOmitsTachanun() {
+        val eves = listOf(LocalDate(2026, 9, 11), LocalDate(2026, 9, 20), LocalDate(2026, 9, 25), LocalDate(2027, 4, 21))
+        for (nusach in Nusach.entries) {
+            val prefs = SiddurPrefs(nusach, inIsrael = true, minyan = true, beitAvel = false)
+            for (date in eves) {
+                assertFalse("tachanun" in flagsFor(date, SiddurPart.MINCHA, prefs), "$nusach $date")
+            }
+            assertTrue("erev_yom_kippur" in flagsFor(LocalDate(2026, 9, 20), SiddurPart.MINCHA, prefs))
+        }
+    }
+
+    @Test
     fun nightUsesTheNextHebrewDay() {
         val friday = LocalDate(2026, 11, 6)
         val saturday = LocalDate(2026, 11, 7)
