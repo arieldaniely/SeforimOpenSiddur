@@ -54,7 +54,16 @@ suspend fun buildDayBook(
 
     suspend fun section(part: SiddurPart, date: LocalDate, night: Boolean): BookSection? {
         val selected = options.filter { it.startsWith("${part.name}:") }.map { it.substringAfter(':') }.toSet()
-        val flags = flagsFor(date, part, prefs) + if ("zimun_10" in selected) selected + "zimun" else selected
+        val readings = readingsFor(date, part, prefs)
+        val flags = flagsFor(date, part, prefs) +
+            readings.mapNotNull {
+                when (it.kind) {
+                    ReadingKind.TORAH -> "torah_reading"
+                    ReadingKind.HAFTARAH -> "haftarah"
+                    ReadingKind.MEGILLAH -> null
+                }
+            } +
+            (if ("zimun_10" in selected) selected + "zimun" else selected)
         val machzor = if (part.festival) machzorTitle(flags, nusach) else null
         var lines = when {
             machzor != null -> {
@@ -72,6 +81,7 @@ suspend fun buildDayBook(
         if (part == NEROT_CHANUKA && lines.isNotEmpty()) lines = lines.withSlot("chanuka_candles")
         if (part == KIDDUSH_LEVANA && lines.isNotEmpty()) lines = lines.withSlot("kiddush_levana")
         val annotated = annotateCorpus(lines, flags, showAll, amud.takeIf { machzor == null })
+            .withReadings(if (machzor == null) readings else readings.filter { it.kind == ReadingKind.MEGILLAH }, part)
         return annotated.takeIf { it.any { line -> line.kind == Kind.TEXT } }?.let { BookSection(part, date, night, flags, it) }
     }
 
@@ -87,6 +97,47 @@ private fun holidayReading(key: String, flags: Set<String>): Boolean =
 
 private fun List<SiddurLine>.withSlot(name: String): List<SiddurLine> =
     take(1) + SiddurLine(name, Kind.SLOT) + drop(1)
+
+private fun List<SiddurLine>.withReadings(readings: List<SiddurReading>, part: SiddurPart): List<SiddurLine> {
+    if (readings.isEmpty() || isEmpty()) return this
+    val labels = map { plain(it.html) }
+    val torahHeadings = setOf("קריאת התורה", "סדר קריאת התורה בשבת", "קריאת התורה לתענית ציבור", "קריאה לתענית ציבור")
+    val torahStart = indices.lastOrNull { this[it].kind == Kind.HEADING && labels[it] in torahHeadings } ?: -1
+    val haftaraStart = indices.firstOrNull {
+        it > torahStart && this[it].kind == Kind.HEADING && labels[it] in setOf("הפטרה", "ברכות ההפטרה")
+    }
+    val musaf = indices.firstOrNull { this[it].kind == Kind.HEADING && labels[it].startsWith("מוסף") } ?: size
+    val torahEnd = minOf(haftaraStart ?: size, musaf)
+    val torahInsert = (torahStart + 1 until torahEnd).firstOrNull {
+        labels[it].startsWith("אחר קריאת התורה") || labels[it] in setOf("ברכת הגומל", "הגבהה", "החזרת ספר תורה")
+    } ?: when {
+        torahStart >= 0 -> torahStart + 1
+        part.familyOf() == MINCHA -> indices.firstOrNull {
+            this[it].kind == Kind.HEADING && labels[it] in amidahHeadings
+        } ?: size
+        else -> musaf
+    }
+    val haftaraInsert = haftaraStart?.let { start ->
+        (start + 1 until size).firstOrNull {
+            labels[it].startsWith("אחרי קריאת ההפטרה") || labels[it].startsWith("אחר קריאת ההפטרה")
+        } ?: start + 1
+    } ?: torahInsert
+    val inserts = readings.groupBy { reading ->
+        when (reading.kind) {
+            ReadingKind.TORAH -> torahInsert
+            ReadingKind.HAFTARAH -> haftaraInsert
+            ReadingKind.MEGILLAH -> size
+        }
+    }
+    return buildList {
+        for (index in 0..this@withReadings.size) {
+            for (reading in inserts[index].orEmpty()) {
+                add(SiddurLine(reading.kind.name, Kind.SLOT, reading = reading))
+            }
+            this@withReadings.getOrNull(index)?.let(::add)
+        }
+    }
+}
 
 private fun festivalPrayer(
     base: Outline,
@@ -162,21 +213,14 @@ private fun morningAdditions(
     val reading = lines.indexOfFirst {
         it.kind == Kind.HEADING && (plain(it.html).startsWith("קריאת התורה") || plain(it.html).startsWith("סדר קריאת התורה"))
     }.takeIf { it >= 0 } ?: lines.size
-    val weeklyReading = if ("sat" in flags && "festival" !in flags && "torah_reading" in flags) {
-        listOf(SiddurLine("weekly_reading", Kind.SLOT))
-    } else {
-        emptyList()
-    }
-    val readingStart = (reading + 1).coerceAtMost(lines.size)
     val endPrayers = if ("sat" in flags || "festival" in flags) {
         lines.size
     } else {
-        (readingStart until lines.size).firstOrNull {
+        (reading until lines.size).firstOrNull {
             lines[it].kind == Kind.HEADING && plain(lines[it].html) in setOf("עלינו", "עלינו לשבח")
         } ?: lines.size
     }
-    return lines.take(reading) + hallel + lines.subList(reading, readingStart) + weeklyReading +
-        lines.subList(readingStart, endPrayers) + musaf + lines.drop(endPrayers)
+    return lines.take(reading) + hallel + lines.subList(reading, endPrayers) + musaf + lines.drop(endPrayers)
 }
 
 private val numberedOmer = Regex("^.*?([0-9]{1,2})[.]\\s*היום")

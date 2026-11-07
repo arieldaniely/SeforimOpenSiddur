@@ -16,6 +16,10 @@ private val rubrics =
         Rubric(Regex("^קדושה$"), Regex("^אתה קדוש"), "minyan", 12),
         Rubric(Regex("^ברכת כהנים$"), Regex("^שים שלום"), "minyan", 20),
         Rubric(Regex("^בתענית ציבור השליח ציבור אומר בחזרה"), Regex("^רפאנו"), "fast_repetition", 6),
+        Rubric(Regex("^בשבת יאמר$"), Regex("^ואם חל ראש חודש בשבת יאמר"), "!rosh_chodesh", 7),
+        Rubric(Regex("^ואם חל ראש חודש בשבת יאמר"), Regex("^ישמחו במלכותך"), "rosh_chodesh", 12),
+        Rubric(Regex("^כשחל ראש חודש בשבת אומרים"), Regex("^תכנת שבת רצית"), "rosh_chodesh", 14),
+        Rubric(Regex("^וממשיכים רצה"), Regex("^רצה יהוה"), "!rosh_chodesh", 8),
         Rubric(
             Regex("^(אם המסובים שלושה או יותר אומרים|שלושה שאכלו כאחד חייבין בזימון)"),
             Regex("^ברוך אתה .{1,10} אלהינו מלך העולם"),
@@ -66,6 +70,14 @@ internal fun annotateCorpus(
         }
         val season = text[index].trimEnd(':', '׃')
         val next = text.getOrNull(index + 1).orEmpty()
+        val blessing = text[index].trimStart('(')
+        when {
+            blessing.startsWith("אתה חוננתנו") || blessing == "במוצאי שבת ויום טוב אומרים" ->
+                conditions[index].add("havdala")
+            blessing.startsWith("ותודיענו") || "במוצאי שבת אומרים ותודיענו" in blessing ||
+                blessing == "במוצאי שבת אומרים" && next.startsWith("ותודיענו") ->
+                conditions[index].add("vatodieinu")
+        }
         val seasonFlag = when {
             season == "בקיץ" && next.startsWith("מוריד הטל") -> "morid_hatal"
             season == "בחורף" && next.startsWith("משיב הרוח") -> "mashiv_haruach"
@@ -84,7 +96,8 @@ internal fun annotateCorpus(
         val applies = conditionsOnLine.all { flag -> if (flag.startsWith('!')) flag.drop(1) !in flags else flag in flags } &&
             tagged != false
         if (!showAll && !applies) return@mapIndexedNotNull null
-        var html = if (showAll) line.html else teshuvaInline.replace(line.html) { match ->
+        val selected = if (showAll) line.html else amud?.applyInline(line.html, flags) ?: line.html
+        var html = if (showAll) selected else teshuvaInline.replace(selected) { match ->
             val instruction = plain(match.groupValues[1])
             if (!instruction.startsWith("בעשרת ימי תשובה")) {
                 match.value
@@ -94,6 +107,7 @@ internal fun annotateCorpus(
                 ""
             }
         }
+        if (!showAll && plain(html).isEmpty()) return@mapIndexedNotNull null
         if (!showAll && "zimun" in conditionsOnLine) {
             for (pattern in listOf(tenSmall, tenRitual)) {
                 html = pattern.replace(html) { if ("zimun_10" in flags) it.groupValues[1] else "" }

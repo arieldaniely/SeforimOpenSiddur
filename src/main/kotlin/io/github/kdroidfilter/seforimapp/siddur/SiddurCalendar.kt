@@ -42,6 +42,7 @@ internal fun flagsFor(
         if (prefs.nusach == Nusach.ASHKENAZ) add("ashkenaz")
         if (shabbat) add("sat")
         if (festival) add("festival")
+        if (!shabbat && !festival) add("weekday")
         if (day.isRoshChodesh) add("rosh_chodesh")
         if (day.isCholHamoed) add("chol_hamoed")
         if (day.isTaanis && day.yomTovIndex != JewishCalendar.YOM_KIPPUR) add("taanit")
@@ -91,14 +92,8 @@ internal fun flagsFor(
         if (day.jewishDayOfMonth in (if (prefs.nusach == Nusach.EDOT_HAMIZRACH) 7 else 3)..15) add("levana")
         if (previous.isAssurBemelacha && !day.isAssurBemelacha) add("havdala")
         if (date.dayOfWeek == DayOfWeek.SUNDAY) add("motzaei_shabbat")
+        if (date.dayOfWeek == DayOfWeek.SUNDAY && part == MAARIV_YOM_TOV) add("vatodieinu")
         if (date.dayOfWeek == DayOfWeek.MONDAY || date.dayOfWeek == DayOfWeek.THURSDAY) add("mon_thu")
-        if (prefs.minyan && (
-                shabbat || "taanit" in this || family == SHACHARIT &&
-                    (festival || day.isRoshChodesh || day.isCholHamoed || day.isChanukah || purim || "mon_thu" in this)
-            )
-        ) {
-            add("torah_reading")
-        }
         if (day.jewishMonth == HebrewMonth.TISHREI && day.jewishDayOfMonth <= 10) add("aseret_yemei_teshuva")
         if (day.jewishMonth == HebrewMonth.ELUL || day.jewishMonth == HebrewMonth.TISHREI && day.jewishDayOfMonth <= 21) {
             add("ledavid_ori")

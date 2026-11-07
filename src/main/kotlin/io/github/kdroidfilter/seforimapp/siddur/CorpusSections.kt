@@ -48,7 +48,13 @@ internal class Outline(
                 for (node in nodesAtRow) {
                     while (stack.lastOrNull()?.first?.heading?.level?.let { it >= node.heading.level } == true) stack.removeLast()
                     val label = node.path.last()
-                    stack.add(node to if (node == root) null else condition(label))
+                    val rule = when {
+                        node == root -> null
+                        root.path.last() == "מוסף לשבת" && label == "לשבת" -> "!rosh_chodesh"
+                        label == "לשבת ראש חודש" -> "rosh_chodesh"
+                        else -> condition(label)
+                    }
+                    stack.add(node to rule)
                 }
                 val conditions = stack.mapNotNull { it.second }
                 val lineCondition = if (nodesAtRow.isEmpty()) condition(plain(row).substringBefore(':')) else null
@@ -92,6 +98,7 @@ private fun condition(label: String): String? =
         label in setOf("על הנסים", "על הניסים") -> "al_hanisim"
         label.startsWith("קריאה לתענית ציבור") -> "taanit"
         label in setOf("קריאת התורה", "סדר קריאת התורה בשבת", "קריאת התורה לראש חדש") -> "torah_reading"
+        label in setOf("הפטרה", "ברכות ההפטרה", "ברכות לאחר ההפטרה") -> "haftarah"
         label.startsWith("תוספות למוצאי שבת") || label == "ערבית למוצאי שבת" -> "motzaei_shabbat"
         label == "ברכי נפשי" -> "rosh_chodesh"
         label in setOf("לדוד", "לדוד ה") -> "ledavid_ori"

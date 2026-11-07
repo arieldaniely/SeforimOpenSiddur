@@ -64,6 +64,7 @@ data class SiddurLine(
     val headingLevel: Int = 3,
     val special: Boolean = false,
     val skipped: Boolean = false,
+    val reading: SiddurReading? = null,
 ) {
     enum class Kind { TEXT, HEADING, NOTE, SLOT }
 }
