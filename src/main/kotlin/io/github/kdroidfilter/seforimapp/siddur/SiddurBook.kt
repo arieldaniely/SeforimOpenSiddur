@@ -57,6 +57,7 @@ data class SiddurPrefs(
     val minyan: Boolean,
     val beitAvel: Boolean,
     val mukafChoma: Boolean = false,
+    val israeliPrayerCustom: IsraeliPrayerCustom = IsraeliPrayerCustom.NO_TACHANUN,
 )
 
 data class SiddurLine(

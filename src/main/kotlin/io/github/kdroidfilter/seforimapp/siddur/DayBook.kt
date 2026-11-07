@@ -55,13 +55,15 @@ suspend fun buildDayBook(
     }
 
     suspend fun section(part: SiddurPart, date: LocalDate, night: Boolean): BookSection? {
+        val family = part.familyOf()
         val selected = options.filter { it.startsWith("${part.name}:") }.map { it.substringAfter(':') }.toSet()
         val readings = readingsFor(date, part, prefs)
+        val standaloneHaftarah = readings.singleOrNull()?.takeIf { it.kind == ReadingKind.HAFTARAH && !it.withBlessings }
         val flags = flagsFor(date, part, prefs) +
             readings.mapNotNull {
                 when (it.kind) {
                     ReadingKind.TORAH -> "torah_reading"
-                    ReadingKind.HAFTARAH -> "haftarah"
+                    ReadingKind.HAFTARAH -> if (it.withBlessings) "haftarah" else null
                     ReadingKind.MEGILLAH -> null
                 }
             } +
@@ -77,7 +79,48 @@ suspend fun buildDayBook(
             part.festival && part.familyOf() != part -> festivalPrayer(base, part, flags, nusach, showAll)
             else -> base.read(baseKeys(part, nusach), flags, showAll)
         }
-        if (part.familyOf() == SHACHARIT && machzor == null) {
+        val occasion = israeliOccasion(date)
+        if (occasion?.hasThanksgivingPrayer == true) {
+            if ("israeli_hallel" in flags) {
+                val hallel = hallelLines(base, flags, nusach, showAll)
+                val haftarah = standaloneHaftarah?.let { SiddurLine(it.kind.name, Kind.SLOT, reading = it) }
+                val publicPrayers = if (prefs.israeliPrayerCustom.festive && family == SHACHARIT) {
+                    outline("סידור קורן השלם; אשכנז")?.read(
+                        listOf("תפילה לשלום מדינת ישראל", "מי שברך לחיילי צה\"ל"),
+                        flags,
+                        showAll,
+                    )?.takeWhile { plain(it.html) != "מי שברך לשבויים" }.orEmpty().map { it.copy(special = true) }
+                } else {
+                    emptyList()
+                }
+                lines = lines.withIsraeliHallel(hallel + publicPrayers + listOfNotNull(haftarah), part)
+            }
+            if (prefs.israeliPrayerCustom.festive) {
+                when (family) {
+                    MAARIV -> {
+                        val independence = occasion == IsraeliOccasion.YOM_HAATZMAUT
+                        val piyyut = if (independence) {
+                            (if (nusach == Nusach.ASHKENAZ) base else outline(Nusach.ASHKENAZ.siddurTitle()))
+                                ?.read(listOf("לכה דודי"), flags, showAll).orEmpty()
+                        } else {
+                            emptyList()
+                        }
+                        lines = lines.withIsraeliMaariv(outline("תהילים"), piyyut, independence, prefs, flags, showAll)
+                    }
+                    SHACHARIT -> {
+                        lines = lines.withIsraeliShacharit(
+                            outline("תהילים"),
+                            occasion == IsraeliOccasion.YOM_YERUSHALAYIM,
+                            nusach,
+                            flags,
+                            showAll,
+                        )
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        if (family == SHACHARIT && machzor == null) {
             lines = morningAdditions(lines, base, flags, nusach, showAll)
             fastSelichot(date, prefs)?.let { fast ->
                 val fastLines = base.read(listOf(fast.key), flags + "selichot", showAll)
@@ -89,7 +132,7 @@ suspend fun buildDayBook(
         if (part == NEROT_CHANUKA && lines.isNotEmpty()) lines = lines.withSlot("chanuka_candles")
         if (part == KIDDUSH_LEVANA && lines.isNotEmpty()) lines = lines.withSlot("kiddush_levana")
         val annotated = annotateCorpus(lines, flags, showAll, amud.takeIf { machzor == null && part != SELICHOT })
-            .withReadings(if (machzor == null) readings else readings.filter { it.kind == ReadingKind.MEGILLAH }, part)
+            .withReadings(readings.filter { it != standaloneHaftarah && (machzor == null || it.kind == ReadingKind.MEGILLAH) }, part)
         return annotated.takeIf { it.any { line -> line.kind == Kind.TEXT } }?.let { BookSection(part, date, night, flags, it) }
     }
 
@@ -198,24 +241,7 @@ private fun morningAdditions(
     nusach: Nusach,
     showAll: Boolean,
 ): List<SiddurLine> {
-    val fullHallel = "hallel_shalem" in flags
-    val halfHallel = "chatzi_hallel" in flags
-    val hallel = if (fullHallel || halfHallel || showAll) {
-        val keys = when (nusach) {
-            Nusach.ASHKENAZ -> listOf("ראש חודש/הלל")
-            Nusach.SEFARD -> listOf("לראש חודש/סדר הלל")
-            Nusach.EDOT_HAMIZRACH -> listOf("סדר ראש חודש/הלל לראש חודש ולמועדים")
-        }
-        base.read(keys, flags, showAll).mapNotNull { line ->
-            val label = plain(line.html)
-            val omitted = (halfHallel || showAll && !fullHallel) &&
-                (label.startsWith("לא לנו") || label.startsWith("אהבתי") || "מדלגין" in label ||
-                    nusach == Nusach.EDOT_HAMIZRACH && (label.startsWith("ברוך אתה") || label.startsWith("יהללוך")))
-            if (omitted && !showAll) null else line.copy(special = true, skipped = omitted || !halfHallel && !fullHallel)
-        }
-    } else {
-        emptyList()
-    }
+    val hallel = if ("israeli_hallel" in flags) emptyList() else hallelLines(base, flags, nusach, showAll)
     val musafKeys = when {
         "festival" in flags || "chol_hamoed" in flags -> when (nusach) {
             Nusach.ASHKENAZ -> listOf("תפילות לשלוש רגלים/מוסף")
@@ -238,6 +264,34 @@ private fun morningAdditions(
         } ?: lines.size
     }
     return lines.take(reading) + hallel + lines.subList(reading, endPrayers) + musaf + lines.drop(endPrayers)
+}
+
+private fun hallelLines(
+    base: Outline,
+    flags: Set<String>,
+    nusach: Nusach,
+    showAll: Boolean,
+): List<SiddurLine> {
+    val fullHallel = "hallel_shalem" in flags
+    val halfHallel = "chatzi_hallel" in flags
+    return if (fullHallel || halfHallel || showAll) {
+        val keys = when (nusach) {
+            Nusach.ASHKENAZ -> listOf("ראש חודש/הלל")
+            Nusach.SEFARD -> listOf("לראש חודש/סדר הלל")
+            Nusach.EDOT_HAMIZRACH -> listOf("סדר ראש חודש/הלל לראש חודש ולמועדים")
+        }
+        val corpus = base.read(keys, flags, showAll)
+        if ("israeli_hallel" in flags) return israeliHallel(corpus, flags, showAll)
+        corpus.mapNotNull { line ->
+            val label = plain(line.html)
+            val omitted = (halfHallel || showAll && !fullHallel) &&
+                (label.startsWith("לא לנו") || label.startsWith("אהבתי") || "מדלגין" in label ||
+                    nusach == Nusach.EDOT_HAMIZRACH && (label.startsWith("ברוך אתה") || label.startsWith("יהללוך")))
+            if (omitted && !showAll) null else line.copy(special = true, skipped = omitted || !halfHallel && !fullHallel)
+        }
+    } else {
+        emptyList()
+    }
 }
 
 private val numberedOmer = Regex("^.*?([0-9]{1,2})[.]\\s*היום")

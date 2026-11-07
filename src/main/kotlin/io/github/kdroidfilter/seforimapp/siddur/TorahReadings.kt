@@ -27,6 +27,7 @@ data class SiddurReading(
     val kind: ReadingKind,
     val occasion: String,
     val passages: List<ReadingPassage>,
+    val withBlessings: Boolean = true,
 )
 
 private data class DayKey(
@@ -70,7 +71,22 @@ fun readingsFor(
         } else {
             ordinary
         }
-    val schedule = candidate ?: return emptyList()
+    val thanksgivingHaftarah = prefs.minyan && prefs.israeliPrayerCustom.festive && service == "morning" &&
+        israeliOccasion(day) == IsraeliOccasion.YOM_HAATZMAUT
+    val additions =
+        if (thanksgivingHaftarah) {
+            listOf(
+                SiddurReading(
+                    kind = ReadingKind.HAFTARAH,
+                    occasion = "",
+                    passages = listOf(ReadingPassage("ישעיהו", VerseAddress(10, 32), VerseAddress(12, 6), null)),
+                    withBlessings = false,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+    val schedule = candidate ?: return additions
     val sephardic = prefs.nusach == Nusach.EDOT_HAMIZRACH
     val minorFastMincha = service == "mincha" && day.isTaanis &&
         day.yomTovIndex !in setOf(JewishCalendar.YOM_KIPPUR, JewishCalendar.TISHA_BEAV)
@@ -90,7 +106,7 @@ fun readingsFor(
     ).mapNotNull { (kind, passages) ->
         passages.takeIf { it.isNotEmpty() && (prefs.minyan || kind == ReadingKind.MEGILLAH) }
             ?.let { SiddurReading(kind, schedule.occasion, it) }
-    }
+    } + additions
 }
 
 private val schedules by lazy {

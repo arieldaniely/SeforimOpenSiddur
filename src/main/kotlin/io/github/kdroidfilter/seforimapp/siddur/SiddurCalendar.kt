@@ -36,8 +36,11 @@ internal fun flagsFor(
     val shabbat = date.dayOfWeek == DayOfWeek.SATURDAY
     val festival = day.isYomTovAssurBemelacha
     val previous = JewishCalendar(date.plus(-1, DateTimeUnit.DAY), prefs.inIsrael)
-    val minchaBeforeFestival = family == MINCHA &&
-        JewishCalendar(date.plus(1, DateTimeUnit.DAY), prefs.inIsrael).isYomTovAssurBemelacha
+    val tomorrow = date.plus(1, DateTimeUnit.DAY)
+    val minchaBeforeFestival = family == MINCHA && JewishCalendar(tomorrow, prefs.inIsrael).isYomTovAssurBemelacha
+    val occasion = israeliOccasion(day)
+    val omitsTachanun = occasion?.hasThanksgivingPrayer == true ||
+        family == MINCHA && israeliOccasion(tomorrow)?.hasThanksgivingPrayer == true
     return buildSet {
         if (prefs.inIsrael) add("israel")
         if (prefs.minyan) add("minyan")
@@ -45,12 +48,26 @@ internal fun flagsFor(
         if (shabbat) add("sat")
         if (festival) add("festival")
         if (!shabbat && !festival) add("weekday")
+        if (occasion != null) {
+            add(
+                when (occasion) {
+                    IsraeliOccasion.YOM_HAZIKARON -> "yom_hazikaron"
+                    IsraeliOccasion.YOM_HAATZMAUT -> "yom_haatzmaut"
+                    IsraeliOccasion.YOM_YERUSHALAYIM -> "yom_yerushalayim"
+                },
+            )
+            if (prefs.israeliPrayerCustom.saysHallel(occasion, part)) {
+                add("israeli_hallel")
+                add("hallel_shalem")
+                if (!prefs.israeliPrayerCustom.festive) add("hallel_without_blessings")
+            }
+        }
         if (family == MINCHA && day.isErevYomKippur) add("erev_yom_kippur")
         if (family == MINCHA && day.isErevRoshHashana) add("erev_rosh_hashana")
         if (day.isRoshChodesh) add("rosh_chodesh")
         if (day.isCholHamoed) add("chol_hamoed")
         if (day.isTaanis && day.yomTovIndex != JewishCalendar.YOM_KIPPUR) add("taanit")
-        if (!prefs.beitAvel && when (family) {
+        if (!prefs.beitAvel && !omitsTachanun && when (family) {
                 SHACHARIT -> rules.isTachanunRecitedShacharis(day)
                 MINCHA -> !minchaBeforeFestival && rules.isTachanunRecitedMincha(day)
                 else -> false
