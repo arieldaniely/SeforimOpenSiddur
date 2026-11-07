@@ -38,7 +38,6 @@ suspend fun buildDayBook(
         }
         add(dayPartFor(civil, MINCHA, prefs))
         if (fast) add(NEILA)
-        if (!fast) addAll(listOf(BIRKAT_HAMAZON, MEEIN_SHALOSH, TEFILAT_HADERECH))
     }
     val nightParts = buildList {
         if (nightFlags.any { it.startsWith("chanuka_") } || showAll) add(NEROT_CHANUKA)
@@ -48,7 +47,6 @@ suspend fun buildDayBook(
         if ("omer" in nightFlags || showAll) add(SFIRAT_HAOMER)
         if (!fastTonight && ("sat" in nightFlags || "festival" in nightFlags)) {
             add(if ("festival" in nightFlags) LEIL_YOM_TOV else LEIL_SHABBAT)
-            add(BIRKAT_HAMAZON)
         }
         if ("levana" in nightFlags || showAll) add(KIDDUSH_LEVANA)
         add(KRIAT_SHEMA_AL_HAMITA)
@@ -128,15 +126,61 @@ suspend fun buildDayBook(
             }
         }
         if (part == SFIRAT_HAOMER && !showAll) lines = selectOmer(lines, flags, nusach)
-        if (part == MEEIN_SHALOSH && !showAll) lines = selectFood(lines, flags)
+        if (part == MAARIV) lines = lines.withMaarivHeadings()
+        if (part == MEEIN_SHALOSH) {
+            lines = selectFood(lines, flags).splitMealAdditions()
+        }
         if (part == NEROT_CHANUKA && lines.isNotEmpty()) lines = lines.withSlot("chanuka_candles")
         if (part == KIDDUSH_LEVANA && lines.isNotEmpty()) lines = lines.withSlot("kiddush_levana")
-        val annotated = annotateCorpus(lines, flags, showAll, amud.takeIf { machzor == null && part != SELICHOT })
+        val skipped = when (part) {
+            NEROT_CHANUKA -> "chanuka" !in flags
+            SFIRAT_HAOMER -> "omer" !in flags
+            KIDDUSH_LEVANA -> "levana" !in flags
+            else -> false
+        }
+        if (skipped) lines = lines.map { it.copy(skipped = true) }
+        if (part == BIRKAT_HAMAZON && !showAll) lines = lines.selectMigdol(flags, night)
+        val annotated = annotateCorpus(lines, flags, showAll, amud.takeIf { machzor == null && part != SELICHOT }, part)
+            .withoutRepeatedHeadingText()
             .withReadings(readings.filter { it != standaloneHaftarah && (machzor == null || it.kind == ReadingKind.MEGILLAH) }, part)
-        return annotated.takeIf { it.any { line -> line.kind == Kind.TEXT } }?.let { BookSection(part, date, night, flags, it) }
+        if (annotated.none { it.kind == Kind.TEXT }) return null
+        val display = if (part == MEEIN_SHALOSH && selected.none(part.options::contains)) emptyList() else annotated
+        return BookSection(part, date, night, flags, display)
     }
 
-    return dayParts.mapNotNull { section(it, civil, false) } + nightParts.mapNotNull { section(it, tomorrow, true) }
+    return buildList {
+        addAll(dayParts.mapNotNull { section(it, civil, false) })
+        addAll(nightParts.mapNotNull { section(it, tomorrow, true) })
+        for (part in listOf(BIRKAT_HAMAZON, MEEIN_SHALOSH)) {
+            val day = if (fast) null else section(part, civil, false)
+            if (day != null) add(day)
+            val relevant = if (part == BIRKAT_HAMAZON) mealDayFlags + birkatHamazonDayFlags else mealDayFlags
+            if (!fastTonight && (day == null || dayFlags.intersect(relevant) != nightFlags.intersect(relevant))) {
+                section(part, tomorrow, true)?.let(::add)
+            }
+        }
+        if (!fast) section(TEFILAT_HADERECH, civil, false)?.let(::add)
+    }
+}
+
+private val mealDayFlags = setOf(
+    "sat", "festival", "rosh_chodesh", "rosh_hashana", "pesach", "shvii_shel_pesach", "shavuot", "sukkot",
+    "shmini_atzeret", "simchat_torah",
+)
+private val birkatHamazonDayFlags = setOf("chanuka", "purim")
+
+private fun List<SiddurLine>.withMaarivHeadings(): List<SiddurLine> =
+    mapNotNull { line ->
+        when (plain(line.html)) {
+            "ברכו" -> line.takeUnless { it.kind == Kind.HEADING }
+            "תפילת ערבית לימי החול", "תפילת עמידה ליום חול" -> null
+            else -> line
+        }
+    }
+
+private fun List<SiddurLine>.withoutRepeatedHeadingText(): List<SiddurLine> = filterIndexed { index, line ->
+    val previous = getOrNull(index - 1)
+    line.kind != Kind.TEXT || previous?.kind != Kind.HEADING || plain(line.html) != plain(previous.html)
 }
 
 private fun List<SiddurLine>.withFastSelichot(selichot: List<SiddurLine>): List<SiddurLine> {
@@ -287,7 +331,7 @@ private fun hallelLines(
             val omitted = (halfHallel || showAll && !fullHallel) &&
                 (label.startsWith("לא לנו") || label.startsWith("אהבתי") || "מדלגין" in label ||
                     nusach == Nusach.EDOT_HAMIZRACH && (label.startsWith("ברוך אתה") || label.startsWith("יהללוך")))
-            if (omitted && !showAll) null else line.copy(special = true, skipped = omitted || !halfHallel && !fullHallel)
+            if (omitted && !showAll) null else line.copy(special = true, skipped = line.skipped || omitted || !halfHallel && !fullHallel)
         }
     } else {
         emptyList()

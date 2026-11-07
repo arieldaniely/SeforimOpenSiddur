@@ -69,7 +69,8 @@ internal class Outline(
                     if (flag.startsWith("!")) flag.drop(1) !in flags else flag in flags
                 }
                 // These are their own sections in the day book.
-                if ("separate" in conditions || !showAll && !applies) return@row emptyList()
+                if ("separate" in conditions) return@row emptyList()
+                // Keep skipped rows until annotateCorpus has matched any rubric that uses them as anchors.
                 val node = nodesAtRow.lastOrNull()
                 if (node != null) {
                     val heading = SiddurLine(
@@ -82,7 +83,8 @@ internal class Outline(
                     if (row.trimStart().startsWith("<h") || plain(row) == plain(node.heading.title)) return@row listOf(heading)
                     return@row listOf(heading, SiddurLine(row, skipped = !applies)).filter { it.html.isNotBlank() }
                 }
-                val content = seasonalLine(row, flags, showAll)
+                if (applies && showAll) gevurotAlternatives(row, flags)?.let { return@row it }
+                val content = if (applies) seasonalLine(row, flags, showAll) else row
                 if (plain(content).isEmpty()) return@row emptyList()
                 listOf(SiddurLine(content, special = applies && (content != row || lineCondition in specialFlags), skipped = !applies))
             }
@@ -121,6 +123,19 @@ private fun condition(label: String): String? =
 
 /** A source line that explicitly puts both alternatives on the same line. */
 private val smallSpan = Regex("""<small[^>]*>([^<>]*)</small>""")
+private val gevurot = Regex("""^(<small>)?(<small>בקיץ:</small>\s*.+?)\s*(<small>בחורף:</small>\s*.+)$""")
+
+private fun gevurotAlternatives(html: String, flags: Set<String>): List<SiddurLine>? {
+    val (wrapper, summer, winter) = gevurot.matchEntire(html.trim())?.destructured ?: return null
+    val winterWords = if (wrapper.isEmpty()) winter else winter.removeSuffix("</small>")
+    if (!plain(summer).startsWith("בקיץ: מוריד הטל") || !plain(winterWords).startsWith("בחורף: משיב הרוח")) return null
+    val summerApplies = "mashiv_haruach" !in flags && ("ashkenaz" !in flags || "israel" in flags)
+    val winterApplies = "mashiv_haruach" in flags
+    return listOf(
+        SiddurLine(summer, special = summerApplies, skipped = !summerApplies),
+        SiddurLine(winterWords, special = winterApplies, skipped = !winterApplies),
+    )
+}
 
 private fun seasonalLine(
     html: String,
@@ -175,11 +190,11 @@ internal fun baseKeys(
             SEFARD -> "סעודת ליל שבת"
             EDOT_HAMIZRACH -> "סדר ליל שבת"
         })
-        SEUDAT_SHABBAT -> listOf(when (nusach) {
-            ASHKENAZ -> "סעודת היום"
-            SEFARD -> "סעודת שבת"
-            EDOT_HAMIZRACH -> "סדר סעודה שניה"
-        })
+        SEUDAT_SHABBAT -> when (nusach) {
+            ASHKENAZ -> listOf("סעודת היום", "סעודת שלישית")
+            SEFARD -> listOf("סעודת שבת", "סעודה שלישית")
+            EDOT_HAMIZRACH -> listOf("סדר סעודה שניה", "סעודה שלישית")
+        }
         HAVDALA -> listOf(if (nusach == ASHKENAZ) "שבת/הבדלה" else "סדר הבדלה")
         BIRKAT_HAMAZON -> listOf(if (nusach == SEFARD) "סדר ברכת המזון" else "ברכת המזון")
         MEEIN_SHALOSH -> listOf(if (nusach == ASHKENAZ) "אכילה/על המחיה" else

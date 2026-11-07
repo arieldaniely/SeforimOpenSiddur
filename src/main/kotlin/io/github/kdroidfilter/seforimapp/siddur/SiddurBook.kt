@@ -97,6 +97,8 @@ fun interface SiddurSource {
 
 const val MARK_START = '\uE000'
 const val MARK_END = '\uE001'
+const val SKIP_START = '\uE004'
+const val SKIP_END = '\uE005'
 
 fun civilDayOf(date: LocalDate, part: SiddurPart): LocalDate =
     if (part.night) date.minus(1, DateTimeUnit.DAY) else date

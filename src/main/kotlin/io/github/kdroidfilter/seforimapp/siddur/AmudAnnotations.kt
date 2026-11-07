@@ -29,13 +29,18 @@ internal class AmudAnnotations(
     ): Boolean? =
         matched[html]?.matches(flags)
 
-    fun applyInline(html: String, flags: Set<String>): String {
+    fun applyInline(html: String, flags: Set<String>, showAll: Boolean): String {
         val hidden = matchedInline[html].orEmpty().filterNot { it.condition.matches(flags) }
         if (hidden.isEmpty()) return html
         return buildString {
             var start = 0
             for (span in hidden) {
                 append(html, start, span.start)
+                if (showAll) {
+                    append(SKIP_START)
+                    append(html, span.start, span.end)
+                    append(SKIP_END)
+                }
                 start = span.end
             }
             append(html, start, html.length)
