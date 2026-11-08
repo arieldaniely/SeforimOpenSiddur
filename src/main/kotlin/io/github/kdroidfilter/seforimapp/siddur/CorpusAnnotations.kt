@@ -13,9 +13,14 @@ private val rubrics =
         Rubric(Regex("^בראש חו?דש ובחול המועד אומרים"), Regex("^(ותחזינה|ואתה ברחמיך)"), "yaale_veyavo", 10),
         Rubric(Regex("^בליל ראש חו?דש יש הנוהגים לומר$"), Regex("^לשם יחוד"), "rosh_chodesh", 3),
         Rubric(Regex("^בחנוכה ופורים אומרים"), Regex("^(ועל ?כלם|על הכל יהוה אלהינו אנחנו מודים)"), "al_hanisim", 12),
-        Rubric(Regex("^מודים דרבנן$"), Regex("^(בחנוכה ופורים|ועל ?כלם)"), "minyan", 6),
-        Rubric(Regex("^קדושה$"), Regex("^אתה קדוש"), "minyan", 12),
-        Rubric(Regex("^ברכת כהנים$"), Regex("^שים שלום"), "minyan", 20),
+        Rubric(
+            Regex("^(מודים דרבנן|כשיגיע שליח צבור למודים)"),
+            Regex("^(בחנוכה ופורים|על הני?סים|ועל ?כלם)"),
+            "repetition",
+            6,
+        ),
+        Rubric(Regex("^קדושה(?: בחזרת השץ.*)?$"), Regex("^(אתה קדוש|קדושת השם$|דעת$)"), "repetition", 24),
+        Rubric(Regex("^ברכת כו?הנים$"), Regex("^(שים שלום|שלום רב|שלום$)"), "repetition", 24),
         Rubric(Regex("^בתענית ציבור השליח ציבור אומר בחזרה"), Regex("^רפאנו"), "fast_repetition", 6),
         Rubric(Regex("^בשבת יאמר$"), Regex("^ואם חל ראש חודש בשבת יאמר"), "!rosh_chodesh", 7),
         Rubric(Regex("^ואם חל ראש חודש בשבת יאמר"), Regex("^ישמחו במלכותך"), "rosh_chodesh", 12),
@@ -55,22 +60,77 @@ private val birkatHamazonYaale = Rubric(
     14,
 )
 
+private val fastAmidahRubrics = listOf(
+    Rubric(
+        Regex("^(?:במנחת תשעה באב:|בתשעה באב אומרים: נחם)"),
+        Regex("^ברוך אתה .*בונה ירושלים"),
+        "nacham",
+        4,
+    ),
+    Rubric(
+        Regex("^(?:בתענית ציבור אומרים כאן עננו בתפילת הלחש|בתענית אומר היחיד עננו|בתשעה באב יש אומרים עננו)"),
+        Regex("^כי אתה שומע תפלת"),
+        "aneinu",
+        4,
+    ),
+    Rubric(
+        Regex("^בתענית ציבור אומר כאן השץ עננו"),
+        Regex("^(רפואה|רפאנו)"),
+        "fast_repetition",
+        5,
+    ),
+)
+private val minchaKohanimRubric = Rubric(
+    Regex("^בתענית ציבור (?:אומר כאן השץ ברכת כהנים|כשמתפללים מנחה קטנה)"),
+    Regex("^(?:שים שלום|שלום רב|שלום$)"),
+    "fast_repetition",
+    16,
+)
+
 internal fun annotateCorpus(
     lines: List<SiddurLine>,
     flags: Set<String>,
     showAll: Boolean,
     amud: AmudAnnotations? = null,
     part: SiddurPart? = null,
+    nusach: Nusach? = null,
 ): List<SiddurLine> {
     val text = lines.map { plain(it.html) }
     val conditions = MutableList(lines.size) { mutableSetOf<String>() }
-    val rules = if (part == SiddurPart.BIRKAT_HAMAZON) rubrics + birkatHamazonYaale else rubrics
+    calendarPassages(lines, text, part, nusach, conditions)
+    val family = part?.familyOf()
+    val rules = when (family) {
+        SiddurPart.BIRKAT_HAMAZON -> rubrics + birkatHamazonYaale
+        SiddurPart.MINCHA -> rubrics + fastAmidahRubrics + minchaKohanimRubric
+        SiddurPart.SHACHARIT, SiddurPart.MAARIV -> rubrics + fastAmidahRubrics
+        else -> rubrics
+    }
     for (index in lines.indices) {
+        if (text[index].trimEnd(':') == "ואומר החזן קדיש תתקבל" &&
+            text.getOrNull(index + 1)?.startsWith("יתגדל ויתקדש") == true
+        ) {
+            conditions[index].add("minyan")
+            for (offset in 1..4) {
+                val label = text.getOrNull(index + offset) ?: break
+                if (!kaddishTiskabelLines[offset - 1].containsMatchIn(label)) break
+                conditions[index + offset].add("minyan")
+            }
+        }
         for (rule in rules) {
             if (!rule.start.containsMatchIn(text[index])) continue
             val end = (index + 1..minOf(index + rule.maxRows, lines.lastIndex))
                 .firstOrNull { rule.end.containsMatchIn(text[it]) } ?: continue
-            (index until end).forEach { conditions[it].add(rule.flag) }
+            val previousIsKohanimTitle = text.getOrNull(index - 1) in kohanimTitles
+            val start = if (rule == minchaKohanimRubric && previousIsKohanimTitle) index - 1 else index
+            (start until end).forEach { conditions[it].add(rule.flag) }
+            if (rule.flag == "nacham") conditions[end].add("!nacham")
+        }
+        if (text[index].startsWith("בחזרת השץ אומרים כאן קדושה")) conditions[index].add("repetition")
+        if (text[index].startsWith("נוסח עננו בג") && "סנסן ליעיר" in text[index]) conditions[index].add("alternate_aneinu")
+        if (text[index].startsWith("(בתענית ציבור אומר כאן השץ עננו")) conditions[index].add("fast_repetition")
+        if (family == SiddurPart.MINCHA && text[index].startsWith("לתענית ציבור: שים שלום")) {
+            conditions[index].add("taanit")
+            if (text.getOrNull(index - 1)?.startsWith("שלום רב") == true) conditions[index - 1].add("!taanit")
         }
         val flag = variant.find(text[index])?.groupValues?.get(1)?.let(variants::get)
         if (flag != null && conditions[index].any { it == "yaale_veyavo" || it == "al_hanisim" }) {
@@ -108,7 +168,7 @@ internal fun annotateCorpus(
             conditions[index + 1].add(seasonFlag)
         }
     }
-    return lines.mapIndexedNotNull { index, line ->
+    return lines.flatMapIndexed { index, line ->
         val conditionsOnLine = conditions[index]
         val tagged = amud?.condition(line.html, flags)
         val applies = !line.skipped && tagged != false && conditionsOnLine.all { flag ->
@@ -118,7 +178,7 @@ internal fun annotateCorpus(
                 else -> if (flag.startsWith('!')) flag.drop(1) !in flags else flag in flags
             }
         }
-        if (!showAll && !applies) return@mapIndexedNotNull null
+        if (!showAll && !applies) return@flatMapIndexed emptyList()
         val selected = if (applies) amud?.applyInline(line.html, flags, showAll) ?: line.html else line.html
         var html = if (!applies || showAll && selected != line.html) selected else teshuvaInline.replace(selected) { match ->
             val instruction = plain(match.groupValues[1])
@@ -134,18 +194,50 @@ internal fun annotateCorpus(
                 else -> ""
             }
         }
-        if (!showAll && plain(html).isEmpty()) return@mapIndexedNotNull null
+        if (!showAll && plain(html).isEmpty() && line.lulavInstruction == null) return@flatMapIndexed emptyList()
         if (!showAll && "zimun" in conditionsOnLine) {
             for (pattern in listOf(tenSmall, tenRitual)) {
                 html = pattern.replace(html) { if ("zimun_10" in flags) it.groupValues[1] else "" }
             }
         }
-        line.copy(
+        val kind = when {
+            "repetition" !in conditionsOnLine || line.kind != SiddurLine.Kind.TEXT -> line.kind
+            text[index].trimEnd(':') in repetitionTitles -> SiddurLine.Kind.HEADING
+            text[index].trimEnd(':') in repetitionInstructions -> SiddurLine.Kind.NOTE
+            else -> line.kind
+        }
+        val annotated = line.copy(
             html = html,
+            kind = kind,
+            headingLevel = if (kind == SiddurLine.Kind.HEADING && kind != line.kind) 5 else line.headingLevel,
             special = applies && (line.special || MARK_START in html || conditionsOnLine.any { it != "minyan" }),
             skipped = !applies,
         )
+        if ("repetition" in conditionsOnLine) annotated.splitRepetitionTitle() else listOf(annotated)
     }
+}
+
+private val kaddishTiskabelLines = listOf(
+    Regex("^יתגדל ויתקדש"), Regex("^תתקבל צלותנא"), Regex("^יהא שלמא רבא"),
+    Regex("^(?:יפסע שלש פסיעות לאחור )?עושה שלום"),
+)
+
+private val kohanimTitles = setOf("ברכת כהנים", "ברכת כוהנים")
+private val repetitionTitles = kohanimTitles + setOf("קדושה", "מודים דרבנן")
+private val repetitionInstructions = setOf(
+    "לחזרת השץ", "בחזרת השץ אומרים", "בחזרת השץ אומרים כאן קדושה", "בחזרת השץ כשהחזן אומר מודים, הקהל אומרים",
+)
+private val inlineRepetitionTitle = Regex("""^\s*(קדושה|מודים דרבנן):?\s*(?:<br\s*/?>\s*)?(?=<small>)""")
+
+private fun SiddurLine.splitRepetitionTitle(): List<SiddurLine> {
+    if (kind != SiddurLine.Kind.TEXT) return listOf(this)
+    val title = inlineRepetitionTitle.find(html) ?: return listOf(this)
+    val body = html.drop(title.range.last + 1)
+    val bodyKind = if (plain(body).trimEnd(':') in repetitionInstructions) SiddurLine.Kind.NOTE else kind
+    return listOf(
+        copy(html = title.groupValues[1], kind = SiddurLine.Kind.HEADING, headingLevel = 5),
+        copy(html = body, kind = bodyKind),
+    )
 }
 
 private val mealFoods = setOf("mezonot", "wine", "fruit")

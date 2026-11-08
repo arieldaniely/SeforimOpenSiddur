@@ -2,6 +2,7 @@ package io.github.kdroidfilter.seforimapp.siddur
 
 import io.github.kdroidfilter.kosherkotlin.hebrewcalendar.HebrewMonth
 import io.github.kdroidfilter.kosherkotlin.hebrewcalendar.JewishCalendar
+import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import java.util.zip.GZIPInputStream
 
@@ -99,14 +100,44 @@ fun readingsFor(
     val megillah = schedule.megillah.takeUnless {
         sephardic && it.firstOrNull()?.bookTitle in setOf("שיר השירים", "רות", "קהלת")
     }.orEmpty()
+    val torah = if (service == "morning" &&
+        day.yomTovIndex in setOf(JewishCalendar.CHOL_HAMOED_SUCCOS, JewishCalendar.HOSHANA_RABBA)
+    ) {
+        sukkotTorahReading(schedule.torah, day.jewishDayOfMonth - 14, date.dayOfWeek == DayOfWeek.SATURDAY, prefs)
+    } else {
+        schedule.torah
+    }
     return listOf(
-        ReadingKind.TORAH to schedule.torah,
+        ReadingKind.TORAH to torah,
         ReadingKind.HAFTARAH to haftarah,
         ReadingKind.MEGILLAH to megillah,
     ).mapNotNull { (kind, passages) ->
         passages.takeIf { it.isNotEmpty() && (prefs.minyan || kind == ReadingKind.MEGILLAH) }
             ?.let { SiddurReading(kind, schedule.occasion, it) }
     } + additions
+}
+
+/** Orach Chayim 663. The generated schedule uses the Diaspora aliyot even in Israel. */
+private fun sukkotTorahReading(
+    scheduled: List<ReadingPassage>,
+    festivalDay: Int,
+    shabbat: Boolean,
+    prefs: SiddurPrefs,
+): List<ReadingPassage> {
+    fun offering(firstDay: Int, lastDay: Int, aliyah: String): ReadingPassage =
+        ReadingPassage("במדבר", VerseAddress(29, 11 + firstDay * 3), VerseAddress(29, 13 + lastDay * 3), aliyah)
+
+    if (prefs.inIsrael) {
+        if (shabbat) return scheduled.map { if (it.aliyah == "M") offering(festivalDay, festivalDay, "M") else it }
+        return (1..4).map { offering(festivalDay, festivalDay, it.toString()) }
+    }
+    if (shabbat || prefs.nusach != Nusach.EDOT_HAMIZRACH) return scheduled
+    return listOf(
+        offering(festivalDay - 1, festivalDay - 1, "1"),
+        offering(festivalDay, festivalDay, "2"),
+        offering(festivalDay, festivalDay, "3"),
+        offering(festivalDay - 1, festivalDay, "4"),
+    )
 }
 
 private val schedules by lazy {

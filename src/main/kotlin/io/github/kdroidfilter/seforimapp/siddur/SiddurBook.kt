@@ -16,7 +16,7 @@ enum class SiddurPart(
     val festival: Boolean = false,
     val options: List<String> = emptyList(),
 ) {
-    SHACHARIT,
+    SHACHARIT(options = listOf("first_lulav")),
     MINCHA,
     MAARIV(night = true),
     SFIRAT_HAOMER(night = true),
@@ -35,7 +35,7 @@ enum class SiddurPart(
     HAVDALA(night = true),
     MAARIV_YOM_TOV(night = true, festival = true),
     LEIL_YOM_TOV(night = true, festival = true),
-    SHACHARIT_YOM_TOV(festival = true),
+    SHACHARIT_YOM_TOV(festival = true, options = listOf("first_lulav")),
     SEUDAT_YOM_TOV(festival = true),
     MINCHA_YOM_TOV(festival = true),
     NEILA(festival = true),
@@ -67,9 +67,20 @@ data class SiddurLine(
     val special: Boolean = false,
     val skipped: Boolean = false,
     val reading: SiddurReading? = null,
+    val moladAnnouncement: MoladAnnouncement? = null,
+    val lulavInstruction: LulavInstruction? = null,
 ) {
     enum class Kind { TEXT, HEADING, NOTE, SLOT }
 }
+
+enum class LulavInstruction { ASHKENAZ_DIRECTIONS, ARI_DIRECTIONS, SHAKE, SHAKE_TWICE, CONGREGATION, LEADER }
+
+data class MoladAnnouncement(
+    val day: String,
+    val hour: Int,
+    val minute: Int,
+    val parts: Int,
+)
 
 data class BookSection(
     val part: SiddurPart,

@@ -52,14 +52,26 @@ internal class Outline(
                         node == root -> null
                         root.path.last() == "מוסף לשבת" && label == "לשבת" -> "!rosh_chodesh"
                         label == "לשבת ראש חודש" -> "rosh_chodesh"
+                        label == "ברכי נפשי" && root.path == listOf("סידור אשכנז", "שבת", "מנחה") -> "winter_psalms"
                         label == "וידוי" && "erev_yom_kippur" in flags -> null
                         "selichot" in flags && condition(label) == "tachanun" -> null
                         else -> condition(label)
                     }
                     stack.add(node to rule)
                 }
+                val label = plain(row)
+                val mincha = root.path.last() in setOf("מנחה לימות החול", "מנחה לימי החול")
+                if (mincha && (label.startsWith("השץ אומר קדיש שלם") || label.startsWith("ואומר החזן קדיש תתקבל"))) {
+                    stack.removeAll { it.second == "tachanun" }
+                }
+                if (label.startsWith("בבית האבל בבוקר אחר שיר של יום ואחר מנחה")) {
+                    stack.removeAll { it.second == "ledavid_ori" }
+                }
+                if (label.startsWith("אשרי יושבי ביתך")) {
+                    stack.removeAll { it.second == "av_harachamim" }
+                }
                 val conditions = stack.mapNotNull { it.second }
-                val text = plain(row).substringBefore(':')
+                val text = label.substringBefore(':')
                 val lineCondition = if (nodesAtRow.isEmpty() && (text != "וידוי" || "erev_yom_kippur" !in flags)) {
                     condition(text)?.takeUnless { it == "tachanun" && "selichot" in flags }
                 } else {
@@ -92,17 +104,21 @@ internal class Outline(
 }
 
 private val specialFlags =
-    setOf("yaale_veyavo", "al_hanisim", "avinu_malkenu", "hallel", "taanit", "rosh_chodesh", "ledavid_ori")
+    setOf(
+        "yaale_veyavo", "al_hanisim", "avinu_malkenu", "hallel", "taanit", "rosh_chodesh", "ledavid_ori",
+        "birkat_hachodesh", "fast_announcement",
+    )
 
 private fun condition(label: String): String? =
     when {
         label in setOf("ספירת העומר", "קריאת שמע על המיטה", "ברכת הלבנה", "קידוש לבנה", "קדוש לבנה") -> "separate"
         label.startsWith("קדיש ") || label in setOf("קדיש", "ברכו", "קדושה", "חזרה", "חזרת השץ", "מודים דרבנן") -> "minyan"
-        label in setOf("תחנון", "וידוי", "וידוי ויג המידות", "נפילת אפים", "נפילת אפיים", "שומר ישראל", "אל ארך אפים") -> "tachanun"
-        label.startsWith("אבינו מלכנו") -> "avinu_malkenu"
-        label in setOf("לשני וחמישי", "לימי שני וחמישי") -> "mon_thu"
+        label in setOf("תחנון", "וידוי", "וידוי ויג המידות", "נפילת אפים", "נפילת אפיים", "שומר ישראל") -> "tachanun"
+        label == "אל ארך אפים" -> "lamenatzeach"
+        label == "אבינו מלכנו" -> "avinu_malkenu"
+        label in setOf("לשני וחמישי", "לימי שני וחמישי") -> "tachanun"
         label == "מזמור לתודה" -> "mizmor_letoda"
-        label.startsWith("למנצח") && label.length < 30 -> "lamenatzeach"
+        label == "למנצח" -> "lamenatzeach"
         label.startsWith("יעלה ויבא") || label.startsWith("יעלה ויבוא") -> "yaale_veyavo"
         label in setOf("על הנסים", "על הניסים") -> "al_hanisim"
         label.startsWith("קריאה לתענית ציבור") -> "taanit"
@@ -111,6 +127,14 @@ private fun condition(label: String): String? =
         label.startsWith("תוספות למוצאי שבת") || label == "ערבית למוצאי שבת" -> "motzaei_shabbat"
         label == "ברכי נפשי" -> "rosh_chodesh"
         label in setOf("לדוד", "לדוד ה") -> "ledavid_ori"
+        label in setOf("ברכת החודש", "ברכת החדש", "הכרזת ראש חדש", "הכרזת ראש חודש") -> "birkat_hachodesh"
+        label == "הכרזת תענית" -> "fast_announcement"
+        label == "אב הרחמים" -> "av_harachamim"
+        label in setOf("צדקתך", "צדקתך צדק") -> "tzidkatcha"
+        label == "פרקי אבות" -> "pirkei_avot"
+        label == "מברכין בהב" -> "behab"
+        label in occasionalBlessingHeadings ->
+            "occasional_blessings"
         label in setOf("יום ראשון של ראש השנה", "ליום ראשון של ראש השנה", "קריאה ליום ראשון של ראש השנה",
             "הפטרה ליום ראשון של ראש השנה", "קריאה ליום ראשון", "הפטרה ליום א") -> "!rh_second_day"
         label in setOf("יום שני של ראש השנה", "ליום שני של ראש השנה", "קריאה ליום שני של ראש השנה",
@@ -120,6 +144,11 @@ private fun condition(label: String): String? =
         label == "הרחמן לברית מילה" -> "seudat_mila"
         else -> null
     }
+
+private val occasionalBlessingHeadings = setOf(
+    "לשבת חתן", "מי שברך ליולדת", "לנער בר מצוה", "סדר זבד הבת", "מי שברך לחולה", "ברכת הגומל",
+    "לחולים", "ליולדות", "יולדת בן", "יולדת בת", "בר מצוה", "בת מצוה", "הזכרת נשמות",
+)
 
 /** A source line that explicitly puts both alternatives on the same line. */
 private val smallSpan = Regex("""<small[^>]*>([^<>]*)</small>""")
@@ -204,7 +233,6 @@ internal fun baseKeys(
         KRIAT_SHEMA_AL_HAMITA -> listOf("קריאת שמע על המיטה", "קריאת שמע שעל המיטה")
         KIDDUSH_LEVANA -> listOf("ברכת הלבנה", "קידוש לבנה")
         NEROT_CHANUKA -> listOf("סדר הדלקת נרות חנוכה", "חנוכה/סדר ההדלקה")
-        LEIL_YOM_TOV -> listOf("קידוש לשלש רגלים")
         SEUDAT_YOM_TOV -> listOf("סדר קידושא רבא לג רגלים ולראש השנה")
         else -> emptyList()
     }
